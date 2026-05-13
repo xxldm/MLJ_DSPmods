@@ -3,6 +3,9 @@ using UnityEngine;
 
 namespace FE.Utils;
 
+/// <summary>
+/// BepInEx 与 Unity 日志输出辅助方法。
+/// </summary>
 public static partial class Utils {
     private static ManualLogSource logger;
 

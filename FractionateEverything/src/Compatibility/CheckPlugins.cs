@@ -7,6 +7,8 @@ using BepInEx.Logging;
 using BuildBarTool;
 using CommonAPI;
 using crecheng.DSPModSave;
+using FE.Compatibility.Mods;
+using FE.Compatibility.Nebula;
 using HarmonyLib;
 using UnityEngine;
 using xiaoye97;
@@ -24,6 +26,7 @@ namespace FE.Compatibility;
 [BepInDependency(BuildBarToolPlugin.GUID, BepInDependency.DependencyFlags.SoftDependency)]
 [BepInDependency(NebulaMultiplayerModAPI.GUID, BepInDependency.DependencyFlags.SoftDependency)]
 [BepInDependency(AutoSorter.GUID, BepInDependency.DependencyFlags.SoftDependency)]
+[BepInDependency(Auxilaryfunction.GUID, BepInDependency.DependencyFlags.SoftDependency)]
 [BepInDependency(BuildToolOpt.GUID, BepInDependency.DependencyFlags.SoftDependency)]
 [BepInDependency(CheatEnabler.GUID, BepInDependency.DependencyFlags.SoftDependency)]
 [BepInDependency(CustomCreateBirthStar.GUID, BepInDependency.DependencyFlags.SoftDependency)]
@@ -148,6 +151,7 @@ public class CheckPlugins : BaseUnityPlugin {
 
 
         AutoSorter.Compatible();
+        Auxilaryfunction.Compatible();
         BuildToolOpt.Compatible();
         CheatEnabler.Compatible();
         CustomCreateBirthStar.Compatible();

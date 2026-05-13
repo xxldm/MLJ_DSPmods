@@ -5,6 +5,9 @@ using System.Text;
 
 namespace FE.Utils;
 
+/// <summary>
+/// 标签化存档块读写辅助方法。
+/// </summary>
 public static partial class Utils {
     /// <summary>
     /// 将一个数据块包装成带 Tag 和长度的格式写入。

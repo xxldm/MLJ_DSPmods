@@ -1,7 +1,10 @@
-﻿using FE.Compatibility;
+﻿using FE.Compatibility.Mods;
 
 namespace FE.Utils;
 
+/// <summary>
+/// 原型 GridIndex 校验与排序辅助方法。
+/// </summary>
 public static partial class Utils {
     /// <summary>
     /// 校验网格索引是否处于当前游戏版本可用范围。

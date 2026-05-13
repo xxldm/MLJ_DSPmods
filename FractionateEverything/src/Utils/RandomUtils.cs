@@ -2,6 +2,9 @@
 
 namespace FE.Utils;
 
+/// <summary>
+/// DSP 风格随机数与随机选择辅助方法。
+/// </summary>
 public static partial class Utils {
     /// <summary>
     /// 戴森球的随机数发生器。

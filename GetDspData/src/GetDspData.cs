@@ -8,8 +8,12 @@ using BepInEx.Bootstrap;
 using BepInEx.Logging;
 using CommonAPI;
 using crecheng.DSPModSave;
-using FE.Logic.Manager;
-using FE.Logic.Recipe;
+using FE.Logic.Buildings;
+using FE.Logic.Fractionation.Fractionators;
+using FE.Logic.Fractionation.Growth;
+using FE.Logic.Fractionation.Process;
+using FE.Logic.Fractionation.FracRecipes;
+using FE.Logic.Items;
 using GetDspData.Utils;
 using HarmonyLib;
 using Newtonsoft.Json;
@@ -17,8 +21,8 @@ using Newtonsoft.Json.Linq;
 using UnityEngine;
 using xiaoye97;
 using static BepInEx.BepInDependency.DependencyFlags;
-using static FE.Logic.Manager.RecipeManager;
-using static FE.Logic.Recipe.ERecipeExtension;
+using static FE.Logic.Fractionation.FracRecipes.RecipeManager;
+using static FE.Logic.Fractionation.FracRecipes.ERecipeExtension;
 using static GetDspData.Utils.Utils;
 
 namespace GetDspData;
@@ -44,6 +48,12 @@ namespace GetDspData;
 [BepInDependency(OrbitalRingGUID, SoftDependency)]
 [BepInDependency(FractionateEverythingGUID, SoftDependency)]
 public class GetDspData : BaseUnityPlugin {
+    private const string DynamicIconPathPrefix = "Assets/texpack/";
+    private const int ExportIconSize = 80;
+    private const string SolutionDir = @"D:\project\csharp\DSP MOD\MLJ_DSPmods";
+    private const string IconExportRequestPath =
+        SolutionDir + @"\gamedata\calc-icon-export-request.json";
+
     #region Logger
 
     private static ManualLogSource logger;
@@ -98,7 +108,6 @@ public class GetDspData : BaseUnityPlugin {
     public const string GenesisBookGUID = "org.LoShin.GenesisBook";
     public const string GBMSHarmonyPatchID = "ProjectGenesis.Compatibility.Gnimaerd.DSP.plugin.MoreMegaStructure";
     public static bool GenesisBookEnable;
-    public static bool GenesisBookExperimentalEnable;
     public const string OrbitalRingGUID = "org.ProfessorCat305.OrbitalRing";
     public const string ORMSHarmonyPatchID = "ProjectOrbitalRing.Compatibility.Gnimaerd.DSP.plugin.MoreMegaStructure";
     public static bool OrbitalRingEnable;
@@ -108,21 +117,16 @@ public class GetDspData : BaseUnityPlugin {
     public void Awake() {
         logger = Logger;
 
-        string solutionDir = @"D:\project\csharp\DSP MOD\MLJ_DSPmods";
-        if (!Directory.Exists(solutionDir)) {
+        if (!Directory.Exists(SolutionDir)) {
             return;
         }
-        dir = $@"{solutionDir}\gamedata";
+        dir = $@"{SolutionDir}\gamedata";
         if (!Directory.Exists(dir)) {
             Directory.CreateDirectory(dir);
         }
         MoreMegaStructureEnable = Chainloader.PluginInfos.ContainsKey(MoreMegaStructureGUID);
         TheyComeFromVoidEnable = Chainloader.PluginInfos.ContainsKey(TheyComeFromVoidGUID);
-        Chainloader.PluginInfos.TryGetValue(GenesisBookGUID, out BepInEx.PluginInfo pluginInfo);
-        if (pluginInfo != null) {
-            GenesisBookEnable = pluginInfo.Metadata.Version.Major > 0;
-            GenesisBookExperimentalEnable = pluginInfo.Metadata.Version.Major == 0;
-        }
+        GenesisBookEnable = Chainloader.PluginInfos.ContainsKey(GenesisBookGUID);
         OrbitalRingEnable = Chainloader.PluginInfos.ContainsKey(OrbitalRingGUID);
         FractionateEverythingEnable = Chainloader.PluginInfos.ContainsKey(FractionateEverythingGUID);
 
@@ -176,35 +180,18 @@ public class GetDspData : BaseUnityPlugin {
         try {
             string modFullStr = "";
             string modShortStr = "";
-            bool[] enable = [
-                MoreMegaStructureEnable,
-                TheyComeFromVoidEnable,
-                GenesisBookEnable,
-                GenesisBookExperimentalEnable,
-                OrbitalRingEnable,
-                FractionateEverythingEnable
+            (bool enabled, string fullName, string shortName)[] calcMods = [
+                (MoreMegaStructureEnable, "MoreMegaStructure", "MS"),
+                (TheyComeFromVoidEnable, "TheyComeFromVoid", "VD"),
+                (GenesisBookEnable, "GenesisBook", "GB"),
+                (OrbitalRingEnable, "OrbitalRing", "OR"),
+                (FractionateEverythingEnable, "FractionateEverything", "FE"),
             ];
-            string[] modFullName = [
-                "MoreMegaStructure",
-                "TheyComeFromVoid",
-                "GenesisBook",
-                "GenesisBook_Experimental",
-                "OrbitalRing",
-                "FractionateEverything"
-            ];
-            string[] modShortName = [
-                "MS",
-                "VD",
-                "GB",
-                "GBEx",
-                "OR",
-                "FE"
-            ];
-            for (int i = 0; i < enable.Length; i++) {
-                if (enable[i]) {
-                    LogInfo($"已启用{modFullName[i]}");
-                    modFullStr += "_" + modFullName[i];
-                    modShortStr += "_" + modShortName[i];
+            foreach (var calcMod in calcMods) {
+                if (calcMod.enabled) {
+                    LogInfo($"已启用{calcMod.fullName}");
+                    modFullStr += "_" + calcMod.fullName;
+                    modShortStr += "_" + calcMod.shortName;
                 }
             }
             modShortStr = modShortStr == "" ? "Vanilla" : modShortStr.Substring(1);
@@ -518,14 +505,15 @@ public class GetDspData : BaseUnityPlugin {
                     factorySpecial = [..factorySpecial, IGB大气采集站];
                 }
                 if (factorySpecial.Count == 0) {
-                    if (item.canMiningByIcarus() || item.recipes == null || item.recipes.Count == 0) {
+                    bool noNormalRecipe = item.recipes == null || item.recipes.Count == 0;
+                    if (item.canMiningByIcarus() || (item.GridIndexValid() && noNormalRecipe)) {
                         factorySpecial = [..factorySpecial, I伊卡洛斯];
                     }
                 }
                 if (item.canMiningByMS()) {
                     factorySpecial = [..factorySpecial, I巨构星际组装厂];
                 }
-                if (item.canDropFromEnemy()) {
+                if (item.GridIndexValid() && item.canDropFromEnemy()) {
                     factorySpecial = [..factorySpecial, I行星基地];
                 }
                 if (factorySpecial.Count > 0) {
@@ -539,7 +527,7 @@ public class GetDspData : BaseUnityPlugin {
                         { "ResultCounts", new JArray(new[] { 1 }) },
                         { "TimeSpend", 60 },
                         { "Proliferator", 0 },
-                        { "IconName", item.iconSprite.name },
+                        { "IconName", ResolveIconName(item) },
                     });
                     firstIdx++;
                 }
@@ -558,7 +546,7 @@ public class GetDspData : BaseUnityPlugin {
                         { "ResultCounts", new JArray(new[] { 1 }) },
                         { "TimeSpend", 600 },
                         { "Proliferator", 0 },
-                        { "IconName", item.iconSprite.name },
+                        { "IconName", ResolveIconName(item) },
                     });
                     firstIdx++;
                     //带透镜的公式
@@ -573,7 +561,7 @@ public class GetDspData : BaseUnityPlugin {
                         { "ResultCounts", new JArray(new[] { 1 }) },
                         { "TimeSpend", 300 },
                         { "Proliferator", 4 },
-                        { "IconName", item.iconSprite.name },
+                        { "IconName", ResolveIconName(item) },
                     });
                     firstIdx++;
                 }
@@ -592,7 +580,7 @@ public class GetDspData : BaseUnityPlugin {
                             { "ResultCounts", new JArray(new[] { 1 }) },
                             { "TimeSpend", 21600 },
                             { "Proliferator", 0 },
-                            { "IconName", item.iconSprite.name },
+                            { "IconName", ResolveIconName(item) },
                         });
                         recipes.Add(new JObject {
                             { "Type", -1 },
@@ -604,7 +592,7 @@ public class GetDspData : BaseUnityPlugin {
                             { "ResultCounts", new JArray(new[] { 1 }) },
                             { "TimeSpend", 600 },
                             { "Proliferator", 1 },
-                            { "IconName", item.iconSprite.name },
+                            { "IconName", ResolveIconName(item) },
                         });
                     } else if (item.ID == IOR蓄电器mk2满) {
                         recipes.Add(new JObject {
@@ -617,7 +605,7 @@ public class GetDspData : BaseUnityPlugin {
                             { "ResultCounts", new JArray(new[] { 1 }) },
                             { "TimeSpend", 21600 },
                             { "Proliferator", 0 },
-                            { "IconName", item.iconSprite.name },
+                            { "IconName", ResolveIconName(item) },
                         });
                         recipes.Add(new JObject {
                             { "Type", -1 },
@@ -629,7 +617,7 @@ public class GetDspData : BaseUnityPlugin {
                             { "ResultCounts", new JArray(new[] { 1 }) },
                             { "TimeSpend", 600 },
                             { "Proliferator", 1 },
-                            { "IconName", item.iconSprite.name },
+                            { "IconName", ResolveIconName(item) },
                         });
                     }
                 } else {
@@ -644,7 +632,7 @@ public class GetDspData : BaseUnityPlugin {
                             { "ResultCounts", new JArray(new[] { 1 }) },
                             { "TimeSpend", 21600 },
                             { "Proliferator", 0 },
-                            { "IconName", item.iconSprite.name },
+                            { "IconName", ResolveIconName(item) },
                         });
                         recipes.Add(new JObject {
                             { "Type", -1 },
@@ -656,7 +644,7 @@ public class GetDspData : BaseUnityPlugin {
                             { "ResultCounts", new JArray(new[] { 1 }) },
                             { "TimeSpend", 600 },
                             { "Proliferator", 1 },
-                            { "IconName", item.iconSprite.name },
+                            { "IconName", ResolveIconName(item) },
                         });
                     }
                 }
@@ -686,7 +674,7 @@ public class GetDspData : BaseUnityPlugin {
                             { "ResultCounts", new JArray(new[] { 1 }) },
                             { "TimeSpend", 60 * 60 },//暂时设为60s
                             { "Proliferator", 1 },//暂时先设为1，以便正确计算增产剂使用数目
-                            { "IconName", item.iconSprite.name },
+                            { "IconName", ResolveIconName(item) },
                         });
                     }
                 }
@@ -694,6 +682,12 @@ public class GetDspData : BaseUnityPlugin {
                 if (FractionateEverythingEnable) {
                     AddFracRecipes(recipes, item);
                 }
+            }
+            //科技
+            var techs = new JArray();
+            dataObj.Add("techs", techs);
+            foreach (var tech in LDB.techs.dataArray) {
+                addTech(tech, techs);
             }
             //特殊物品（无实体的工厂）
             items.Add(new JObject {
@@ -741,6 +735,7 @@ public class GetDspData : BaseUnityPlugin {
                 sw.WriteLine(dataObj.ToString(Formatting.Indented));
             }
             LogInfo($"已生成{filePath}");
+            ExportRequestedIcons();
 
             #endregion
 
@@ -772,6 +767,10 @@ public class GetDspData : BaseUnityPlugin {
     }
 
     private static void AddFracRecipes(JArray recipes, ItemProto item) {
+        if (!item.GridIndexValid()) {
+            return;
+        }
+
         foreach (var type in RecipeTypes) {
             BaseRecipe recipe = GetRecipe<BaseRecipe>(type, item.ID);
             if (recipe == null) {
@@ -781,50 +780,22 @@ public class GetDspData : BaseUnityPlugin {
             //↓测试环境调整↓
             // recipe.SandBoxMaxUpDowngrade(true);
             building.Level(12);
-            recipe.Level = 10;
+            RecipeGrowthExecutor.SetLevelForSandbox(recipe, 5, RecipeGrowthManager.BuildContext());
             int fluidInputIncAvg = 0;
             //↑测试环境调整↑
             float pointsBonus = (float)ProcessManager.MaxTableMilli(fluidInputIncAvg);
             float successBoost = building.SuccessBoost();
-            //成功率
-            float successRatio = recipe.SuccessRatio * (1 + pointsBonus) * (1 + successBoost);
-            //损毁率
-            float destroyRatio = recipe.DestroyRatio;
-            //最终产物转化率
-            float processRatio = (1 - destroyRatio) * successRatio / (destroyRatio + (1 - destroyRatio) * successRatio);
-            Dictionary<int, (float, bool, bool)> outputDic = [];
-            foreach (var info in recipe.OutputMain) {
-                int outputId = info.OutputID;
-                float outputCount = processRatio;
-                outputCount *= info.SuccessRatio;
-                outputCount *= info.OutputCount;
-                if (outputDic.TryGetValue(outputId, out (float, bool, bool) tuple)) {
-                    tuple.Item1 += outputCount;
-                } else {
-                    tuple = (outputCount, info.ShowOutputName, info.ShowSuccessRatio);
-                }
-                outputDic[outputId] = tuple;
-            }
-            foreach (var info in recipe.OutputAppend) {
-                int outputId = info.OutputID;
-                float outputCount = processRatio;
-                outputCount *= info.SuccessRatio;
-                outputCount *= info.OutputCount;
-                if (outputDic.TryGetValue(outputId, out (float, bool, bool) tuple)) {
-                    tuple.Item1 += outputCount;
-                } else {
-                    tuple = (outputCount, info.ShowOutputName, info.ShowSuccessRatio);
-                }
-                outputDic[outputId] = tuple;
-            }
             List<int> Items = [item.ID];
             List<float> ItemCounts = [1];
-            //物品数目是outputDic[物品ID].Item1
             List<int> Results = [];
             List<float> ResultCounts = [];
-            foreach (var p in outputDic) {
-                Results.Add(p.Key);
-                ResultCounts.Add(p.Value.Item1);
+            foreach (var info in recipe.OutputMain) {
+                Results.Add(info.OutputID);
+                ResultCounts.Add(info.OutputCount);
+            }
+            foreach (var info in recipe.OutputAppend) {
+                Results.Add(info.OutputID);
+                ResultCounts.Add(info.OutputCount);
             }
             recipes.Add(new JObject {
                 { "Type", -1 },
@@ -834,11 +805,232 @@ public class GetDspData : BaseUnityPlugin {
                 { "ItemCounts", new JArray(ItemCounts) },
                 { "Results", new JArray(Results) },
                 { "ResultCounts", new JArray(ResultCounts) },
-                { "TimeSpend", Math.Round(60.0f / recipe.SuccessRatio) },
+                { "TimeSpend", 0 },
                 { "Proliferator", 1 },
-                { "IconName", item.iconSprite.name },
+                { "SuccessRatio", recipe.SuccessRatio },
+                { "DestroyRatio", recipe.DestroyRatio },
+                { "RemainInputRatio", recipe.RemainInputRatio },
+                { "DoubleOutputRatio", recipe.DoubleOutputRatio },
+                { "PointsBonus", pointsBonus },
+                { "SuccessBoost", successBoost },
+                { "OutputMain", BuildOutputInfoArray(recipe.OutputMain) },
+                { "OutputAppend", BuildOutputInfoArray(recipe.OutputAppend) },
+                { "IconName", ResolveIconName(item) },
             });
         }
+    }
+
+    private static JArray BuildOutputInfoArray(List<OutputInfo> outputs) {
+        var arr = new JArray();
+        foreach (var output in outputs) {
+            arr.Add(new JObject {
+                { "OutputID", output.OutputID },
+                { "OutputCount", output.OutputCount },
+                { "SuccessRatio", output.SuccessRatio },
+            });
+        }
+        return arr;
+    }
+
+    // 动态图标资源使用 Assets/texpack/<name>，计算器侧需要的名称键就是最终图片名。
+    private static string ResolveIconName(ItemProto proto) =>
+        ResolveIconName(proto?.IconPath, proto?.iconSprite?.name);
+
+    private static string ResolveIconName(RecipeProto proto) =>
+        ResolveIconName(proto?.IconPath, proto?.iconSprite?.name);
+
+    private static string ResolveIconName(string iconPath, string fallbackIconName) {
+        if (!string.IsNullOrEmpty(iconPath)
+            && iconPath.StartsWith(DynamicIconPathPrefix, StringComparison.OrdinalIgnoreCase)) {
+            string dynamicIconName = Path.GetFileName(iconPath.Substring(DynamicIconPathPrefix.Length).Trim());
+            if (!string.IsNullOrEmpty(dynamicIconName)) {
+                return Path.GetFileNameWithoutExtension(dynamicIconName);
+            }
+        }
+        return fallbackIconName ?? "";
+    }
+
+    private static void ExportRequestedIcons() {
+        if (!File.Exists(IconExportRequestPath)) {
+            return;
+        }
+
+        string markerPath = "";
+        try {
+            JObject request = JObject.Parse(File.ReadAllText(IconExportRequestPath));
+            string targetMod = request.Value<string>("TargetMod") ?? "";
+            string outputDir = request.Value<string>("OutputDir") ?? "";
+            markerPath = request.Value<string>("MarkerPath") ?? "";
+            if (string.IsNullOrWhiteSpace(targetMod)
+                || string.IsNullOrWhiteSpace(outputDir)
+                || string.IsNullOrWhiteSpace(markerPath)) {
+                LogWarning("图标导出请求缺少 TargetMod / OutputDir / MarkerPath");
+                return;
+            }
+
+            HashSet<string> lowerPriorityIcons = CollectLowerPriorityIcons(request["LowerPriorityDirs"] as JArray);
+            HashSet<string> requestedIcons = CollectRequestedIcons(request["IconNames"] as JArray);
+            Directory.CreateDirectory(outputDir);
+
+            int exported = 0;
+            int skippedNotRequested = 0;
+            int skippedLowerPriority = 0;
+            int skippedDuplicate = 0;
+            int failed = 0;
+            HashSet<string> handledIcons = new(StringComparer.OrdinalIgnoreCase);
+            foreach ((string iconName, Sprite sprite) in EnumerateCurrentIconSprites()) {
+                if (string.IsNullOrWhiteSpace(iconName) || sprite == null) {
+                    continue;
+                }
+                if (requestedIcons.Count > 0 && !requestedIcons.Contains(iconName)) {
+                    skippedNotRequested++;
+                    continue;
+                }
+                if (!handledIcons.Add(iconName)) {
+                    skippedDuplicate++;
+                    continue;
+                }
+                if (lowerPriorityIcons.Contains(iconName)) {
+                    skippedLowerPriority++;
+                    continue;
+                }
+
+                string outputPath = Path.Combine(outputDir, $"{SanitizeFileName(iconName)}.png");
+                if (TryWriteSpritePng(sprite, outputPath)) {
+                    exported++;
+                } else {
+                    failed++;
+                }
+            }
+
+            JObject marker = new() {
+                { "TargetMod", targetMod },
+                { "OutputDir", outputDir },
+                { "Exported", exported },
+                { "SkippedNotRequested", skippedNotRequested },
+                { "SkippedLowerPriority", skippedLowerPriority },
+                { "SkippedDuplicate", skippedDuplicate },
+                { "Failed", failed },
+                { "Handled", handledIcons.Count },
+            };
+            Directory.CreateDirectory(Path.GetDirectoryName(markerPath) ?? ".");
+            File.WriteAllText(markerPath, marker.ToString(Formatting.Indented), Encoding.UTF8);
+            LogInfo(
+                $"已导出 {targetMod} 图标：{exported} 个，跳过非请求 {skippedNotRequested} 个，跳过已存在/低优先级 {skippedLowerPriority} 个，失败 {failed} 个");
+        }
+        catch (Exception ex) {
+            LogError($"导出图标失败：{ex}");
+            if (!string.IsNullOrWhiteSpace(markerPath)) {
+                JObject marker = new() {
+                    { "Failed", true },
+                    { "Error", ex.ToString() },
+                };
+                Directory.CreateDirectory(Path.GetDirectoryName(markerPath) ?? ".");
+                File.WriteAllText(markerPath, marker.ToString(Formatting.Indented), Encoding.UTF8);
+            }
+        }
+    }
+
+    private static HashSet<string> CollectLowerPriorityIcons(JArray lowerPriorityDirs) {
+        HashSet<string> result = new(StringComparer.OrdinalIgnoreCase);
+        if (lowerPriorityDirs == null) {
+            return result;
+        }
+
+        foreach (JToken token in lowerPriorityDirs) {
+            string dirPath = token.Value<string>();
+            if (string.IsNullOrWhiteSpace(dirPath) || !Directory.Exists(dirPath)) {
+                continue;
+            }
+
+            foreach (string filePath in Directory.GetFiles(dirPath, "*.png")) {
+                result.Add(Path.GetFileNameWithoutExtension(filePath));
+            }
+        }
+        return result;
+    }
+
+    private static HashSet<string> CollectRequestedIcons(JArray iconNames) {
+        HashSet<string> result = new(StringComparer.OrdinalIgnoreCase);
+        if (iconNames == null) {
+            return result;
+        }
+
+        foreach (JToken token in iconNames) {
+            string iconName = token.Value<string>();
+            if (!string.IsNullOrWhiteSpace(iconName)) {
+                result.Add(iconName);
+            }
+        }
+        return result;
+    }
+
+    private static IEnumerable<(string iconName, Sprite sprite)> EnumerateCurrentIconSprites() {
+        foreach (ItemProto item in LDB.items.dataArray) {
+            yield return (ResolveIconName(item), item.iconSprite);
+        }
+        foreach (RecipeProto recipe in LDB.recipes.dataArray) {
+            yield return (ResolveIconName(recipe), recipe.iconSprite);
+        }
+        foreach (TechProto tech in LDB.techs.dataArray) {
+            yield return (ResolveIconName(tech.IconPath, tech.iconSprite?.name), tech.iconSprite);
+        }
+    }
+
+    private static bool TryWriteSpritePng(Sprite sprite, string outputPath) {
+        Texture2D texture = null;
+        Material material = null;
+        RenderTexture renderTexture = null;
+        RenderTexture previous = RenderTexture.active;
+
+        try {
+            Texture2D sourceTexture = sprite.texture;
+            Rect rect = sprite.textureRect;
+            renderTexture = RenderTexture.GetTemporary(ExportIconSize, ExportIconSize, 0, RenderTextureFormat.ARGB32);
+            RenderTexture.active = renderTexture;
+            GL.Clear(true, true, new Color(0f, 0f, 0f, 0f));
+
+            material = new Material(Shader.Find("Unlit/Transparent"));
+            material.mainTextureScale =
+                new Vector2(rect.width / sourceTexture.width, rect.height / sourceTexture.height);
+            material.mainTextureOffset = new Vector2(rect.x / sourceTexture.width, rect.y / sourceTexture.height);
+            Graphics.Blit(sourceTexture, renderTexture, material);
+
+            texture = new Texture2D(ExportIconSize, ExportIconSize, TextureFormat.RGBA32, false);
+            texture.ReadPixels(new Rect(0, 0, ExportIconSize, ExportIconSize), 0, 0);
+            texture.Apply();
+            byte[] png = texture.EncodeToPNG();
+            if (png == null || png.Length == 0) {
+                return false;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
+            File.WriteAllBytes(outputPath, png);
+            return true;
+        }
+        catch (Exception ex) {
+            LogWarning($"导出图标失败：{sprite.name} -> {outputPath}，{ex.Message}");
+            return false;
+        }
+        finally {
+            RenderTexture.active = previous;
+            if (renderTexture != null) {
+                RenderTexture.ReleaseTemporary(renderTexture);
+            }
+            if (material != null) {
+                DestroyImmediate(material);
+            }
+            if (texture != null) {
+                DestroyImmediate(texture);
+            }
+        }
+    }
+
+    private static string SanitizeFileName(string fileName) {
+        foreach (char invalidChar in Path.GetInvalidFileNameChars()) {
+            fileName = fileName.Replace(invalidChar, '_');
+        }
+        return fileName.Trim();
     }
 
     static void addItem(ItemProto proto, JArray add) {
@@ -847,11 +1039,13 @@ public class GetDspData : BaseUnityPlugin {
             { "Type", (int)proto.Type },
             { "Name", proto.name },
             { "GridIndex", proto.GridIndex },
-            { "IconName", proto.iconSprite.name },
+            { "IconName", ResolveIconName(proto) },
         };
         if (proto.GetSpace() >= 0) {
             //对于生产建筑，添加耗能、倍率、占地
             obj.Add("WorkEnergyPerTick", proto.prefabDesc.workEnergyPerTick);
+            obj.Add("BuildIndex", proto.BuildIndex);
+            obj.Add("MultiLevel", proto.prefabDesc.multiLevel);
             //生产设备速率以倍数显示，10000对应1x，20000对应2x
             //计算公式：(double) this.prefabDesc.assemblerSpeed / 10000.0，单位x（也就是倍数）
             //采矿设备速率以速度显示，600000对应1/s，300000对应2/s
@@ -877,6 +1071,27 @@ public class GetDspData : BaseUnityPlugin {
         add.Add(obj);
     }
 
+    static void addTech(TechProto proto, JArray add) {
+        if (proto == null) {
+            return;
+        }
+
+        var obj = new JObject {
+            { "ID", proto.ID },
+            { "Name", proto.FName() },
+            { "HashNeeded", proto.HashNeeded },
+            { "Level", proto.Level },
+            { "MaxLevel", proto.MaxLevel },
+            { "IsLabTech", proto.IsLabTech },
+            { "UnlockFunctions", new JArray(proto.UnlockFunctions ?? Array.Empty<int>()) },
+            { "UnlockValues", new JArray(proto.UnlockValues ?? Array.Empty<double>()) },
+            { "UnlockRecipes", new JArray(proto.UnlockRecipes ?? Array.Empty<int>()) },
+            { "PreTechs", new JArray(proto.PreTechs ?? Array.Empty<int>()) },
+            { "PreTechsImplicit", new JArray(proto.PreTechsImplicit ?? Array.Empty<int>()) },
+        };
+        add.Add(obj);
+    }
+
     /// <summary>
     /// TimeSpend：帧数，一秒对应60帧。也就是说TimeSpend为60时，表示1秒内可以完成制造。
     /// </summary>
@@ -887,13 +1102,33 @@ public class GetDspData : BaseUnityPlugin {
             return;
         }
         if (proto.Type == ERecipeType.Fractionate) {
-            RecipeProto proto2 = CopyRecipeProto(proto);
-            //1%概率分馏出1个重氢，假设传送带速度为x每秒，显然重氢生成速率为x/100每秒
-            //可以转为等价配方：1氢->100s->1重氢
             float produceProb = proto.ResultCounts[0] / (float)proto.ItemCounts[0];
-            proto2.ItemCounts[0] = 1;
-            proto2.ResultCounts[0] = 1;
-            addRecipe(proto2, add, [I分馏塔], (float)Math.Round(1.0f / produceProb));
+            var obj = new JObject {
+                { "Type", (int)proto.Type },
+                { "Factories", new JArray(new[] { I分馏塔 }) },
+                { "Name", proto.name },
+                { "Items", new JArray(new[] { proto.Items[0] }) },
+                { "ItemCounts", new JArray(new[] { 1.0 }) },
+                { "Results", new JArray(new[] { proto.Results[0] }) },
+                { "ResultCounts", new JArray(new[] { 1.0 }) },
+                { "TimeSpend", 0 },
+                { "Proliferator", 1 },
+                { "SuccessRatio", produceProb },
+                { "DestroyRatio", 0.0 },
+                { "RemainInputRatio", 0.0 },
+                { "DoubleOutputRatio", 0.0 }, {
+                    "OutputMain", new JArray {
+                        new JObject {
+                            { "OutputID", proto.Results[0] },
+                            { "OutputCount", 1.0 },
+                            { "SuccessRatio", 1.0 },
+                        }
+                    }
+                },
+                { "OutputAppend", new JArray() },
+                { "IconName", ResolveIconName(proto) },
+            };
+            add.Add(obj);
             return;
         }
         int[] Factories;
@@ -975,7 +1210,7 @@ public class GetDspData : BaseUnityPlugin {
                 { "ResultCounts", new JArray(proto.ResultCounts) },
                 { "TimeSpend", proto.TimeSpend },
                 { "Proliferator", flag4 || !flag2 ? 1 : 3 },
-                { "IconName", proto.iconSprite?.name },
+                { "IconName", ResolveIconName(proto) },
             };
             add.Add(obj);
         } else {
@@ -989,7 +1224,7 @@ public class GetDspData : BaseUnityPlugin {
                 { "ResultCounts", new JArray(proto.ResultCounts) },
                 { "TimeSpend", TimeSpend },
                 { "Proliferator", flag4 || !flag2 ? 1 : 3 },
-                { "IconName", proto.iconSprite?.name },
+                { "IconName", ResolveIconName(proto) },
             };
             add.Add(obj);
         }

@@ -11,15 +11,24 @@ public static class PathConfig {
     private static string _r2ProfileDir =
         $@"{UserDir}\AppData\Roaming\r2modmanPlus-local\DysonSphereProgram\profiles\Default";
     public static string R2ProfileDir => _r2ProfileDir;
-    //将BepInEX.cfg的DumpAssemblies设为true，以生成此DLL
-    // public static readonly string R2ACDll =
-    //     $@"{R2ProfileDir}\BepInEx\DumpedAssemblies\DSPGAME\Assembly-CSharp.dll";
-    public static readonly string R2VDDll =
-        $@"{R2ProfileDir}\BepInEx\plugins\ckcz123-TheyComeFromVoid\DSP_Battle.dll";
-    public static readonly string R2GBDll =
-        $@"{R2ProfileDir}\BepInEx\plugins\HiddenCirno-GenesisBook\ProjectGenesis.dll";
-    public static readonly string R2ORDll =
-        $@"{R2ProfileDir}\BepInEx\plugins\ProfessorCat305-OrbitalRing\ProjectOrbitalRing.dll";
+    public static string ModsConfigPath => $@"{R2ProfileDir}\mods.yml";
+    public static string R2PluginsDir => $@"{R2ProfileDir}\BepInEx\plugins";
+    public static string CompatibilityDir => $@"{SolutionDir}\FractionateEverything\src\Compatibility";
+    public static string CheckPluginsSourcePath => $@"{CompatibilityDir}\CheckPlugins.cs";
+    public static string DspCalcDir => @"D:\project\js\dsp-calc";
+    public static string DspCalcGameDataPath => $@"{DspCalcDir}\src\engine\data\gameData.ts";
+    public static string DspCalcRawDataDir => $@"{DspCalcDir}\src\engine\data\raw";
+    public static string DspCalcIconAssetsDir => $@"{DspCalcDir}\src\ui\components\icons\assets";
+    public static string DspCalcFullIconDir => $@"{SolutionFullDir}\gamedata\icons";
+    public static string CalcJsonLocalDir => $@"{SolutionFullDir}\gamedata\calc json";
+    public static string CalcIconWorkDir => $@"{SolutionFullDir}\gamedata\test";
+    public static string AssetStudioToolDir => $@"{SolutionFullDir}\lib\tools\AssetStudio-net8.0-win";
+    public static string AssetStudioZipPath => $@"{SolutionFullDir}\lib\tools\AssetStudio-net8.0-win.zip";
+    public static string AssetStudioCliPath => $@"{AssetStudioToolDir}\AssetStudio.CLI.exe";
+    public const string AssetStudioDownloadUrl =
+        "https://github.com/Razviar/assetstudio/releases/download/v2.4.1/AssetStudio-net8.0-win.zip";
+    public static string IconExportRequestPath => $@"{SolutionFullDir}\gamedata\calc-icon-export-request.json";
+    public static string IconExportMarkerPath => $@"{SolutionFullDir}\gamedata\calc-icon-export-done.json";
 
     private static string _dspGameDir = @"D:\Steam\steamapps\common\Dyson Sphere Program";
     public static string DSPGameDir => _dspGameDir;
@@ -30,6 +39,7 @@ public static class PathConfig {
     public static string NugetGameLibNet45Dir;
 
     public static string SolutionDir => @"..\..\..\..";
+    public static string SolutionFullDir => ResolveSolutionFullDir();
     public static FileInfo PublicizerExe => new($@"{SolutionDir}\lib\BepInEx.AssemblyPublicizer.Cli.exe");
     public static FileInfo Pdb2mdbExe => new($@"{SolutionDir}\lib\pdb2mdb.exe");
 
@@ -62,5 +72,17 @@ public static class PathConfig {
         catch (Exception ex) {
             Console.WriteLine($"Error loading from DefaultPath.props: {ex.Message}");
         }
+    }
+
+    private static string ResolveSolutionFullDir() {
+        DirectoryInfo dir = new(AppContext.BaseDirectory);
+        while (dir != null) {
+            if (File.Exists(Path.Combine(dir.FullName, "MLJ_DSPmods.sln"))) {
+                return dir.FullName;
+            }
+            dir = dir.Parent;
+        }
+
+        return Path.GetFullPath(SolutionDir);
     }
 }
